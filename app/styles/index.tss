@@ -15,6 +15,6 @@
 }
 
 "#view": {
-	width: 300,
-	height: 300
+	width: Ti.UI.FILL,
+	height: Ti.UI.FILL
 }

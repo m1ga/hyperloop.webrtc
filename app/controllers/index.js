@@ -24,9 +24,14 @@ var activity = new Activity(Ti.Android.currentActivity);
 var Camera2Capturer = require("org.webrtc.Camera2Capturer");
 var ImageView = require("android.widget.ImageView");
 var SurfaceHolder = require("android.view.SurfaceHolder");
+var PeerConnection = require("org.webrtc.PeerConnection");
+var SdpObserver = require("org.webrtc.SdpObserver");
+var List = require("java.util.List");
 var localVideoTrack;
 var peerConnectionFactory;
-
+var localAudioTrack;
+var remotePeer;
+var localPeer;
 
 $.index.addEventListener("open", function() {
 	var permissions = ['android.permission.CAMERA', 'android.permission.READ_EXTERNAL_STORAGE'];
@@ -47,17 +52,24 @@ $.index.addEventListener("open", function() {
 
 
 
+
 function startCamera() {
+	console.log("start camera");
 	PeerConnectionFactory.initializeAndroidGlobals(activity, true, true, true);
 	var rootEglBase = EglBase.create();
 	var videoView = new SurfaceViewRenderer(activity);
 	var options = new PeerConnectionFactory.Options();
 	peerConnectionFactory = new PeerConnectionFactory(options);
 	var videoCapturerAndroid = createVideoCapturer();
-	// var constraints = new MediaConstraints();
+	audioConstraints = new MediaConstraints();
+	videoConstraints = new MediaConstraints();
+
 	peerConnectionFactory.setVideoHwAccelerationOptions(rootEglBase.getEglBaseContext(), rootEglBase.getEglBaseContext());
-	var videoSource = peerConnectionFactory.createVideoSource(videoCapturerAndroid);
+	var videoSource = peerConnectionFactory.createVideoSource(videoCapturerAndroid); //, videoConstraints
 	localVideoTrack = peerConnectionFactory.createVideoTrack("100", videoSource);
+
+	var audioSource = peerConnectionFactory.createAudioSource(audioConstraints);
+	localAudioTrack = peerConnectionFactory.createAudioTrack("101", audioSource);
 
 	CameraCapturer.cast(videoCapturerAndroid).startCapture(1000, 1000, 30);
 
@@ -116,14 +128,92 @@ function createCameraCapturer(enumerator) {
 }
 
 function call() {
+	console.log("call");
+	var iceServers = [];
 	var sdpConstraints = new MediaConstraints();
-	// sdpConstraints.mandatory.add(new MediaConstraints.KeyValuePair("offerToReceiveAudio", "true"));
+	sdpConstraints.mandatory.add(new MediaConstraints.KeyValuePair("offerToReceiveAudio", "true"));
 	sdpConstraints.mandatory.add(new MediaConstraints.KeyValuePair("offerToReceiveVideo", "true"));
 
+	var observerLocal = new PeerConnection.Observer({
+		onIceCandidate: function(iceCandidate) {
+			console.log("on ice");
+			onIceCandidateReceived(localPeer, iceCandidate);
+		},
+		onSignalingChange: function() {},
+		onIceConnectionChange: function() {},
+		onIceConnectionReceivingChange: function() {},
+		onIceGatheringChange: function() {},
+		onIceCandidatesRemoved: function() {},
+		onAddStream: function() {},
+		onRemoveStream: function() {},
+		onDataChannel: function() {},
+		onRenegotiationNeeded: function() {},
+		onAddTrack: function() {}
+	});
+	var observerRemote = new PeerConnection.Observer({
+		onIceCandidate: function(iceCandidate) {
+			console.log("on ice");
+			onIceCandidateReceived(remotePeer, iceCandidate);
+		},
+		onAddStream: function(iceCandidate) {
+			console.log("on add");
+		},
+		onSignalingChange: function() {},
+		onIceConnectionChange: function() {},
+		onIceConnectionReceivingChange: function() {},
+		onIceGatheringChange: function() {},
+		onIceCandidatesRemoved: function() {},
+		onRemoveStream: function() {},
+		onDataChannel: function() {},
+		onRenegotiationNeeded: function() {},
+		onAddTrack: function() {}
+	});
+	var sdpObserverLocal = new SdpObserver({
+		onCreateSuccess: function(sessionDescription) {
+			console.log("set success");
+			localPeer.setLocalDescription(sdpObserverLocal, sessionDescription);
+		},
+		onSetSuccess: function(sessionDescription) {
+			console.log("set success");
+			remotePeer.setRemoteDescription(sdpObserverRemote, sessionDescription);
+		},
+		onCreateFailure: function() {},
+		onSetFailure: function() {}
+	})
+	var sdpObserverRemote = new SdpObserver({
+		onCreateSuccess: function() {
+			console.log("set success");
+		},
+		onSetSuccess: function() {
+			console.log("set success");
+		},
+		onCreateFailure: function() {},
+		onSetFailure: function() {}
+	})
+
+	// creating peers
+	// ERROR -> not working at the moment 
+	localPeer = peerConnectionFactory.createPeerConnection(iceServers, sdpConstraints, observerLocal);
+	remotePeer = peerConnectionFactory.createPeerConnection(iceServers, sdpConstraints, observerRemote);
+
 	var stream = MediaStream.cast(peerConnectionFactory.createLocalMediaStream("102"));
-	// stream.addTrack(localAudioTrack);
+	stream.addTrack(localAudioTrack);
 	stream.addTrack(localVideoTrack);
-	// localPeer.addStream(stream);
+
+	if (localPeer != null) {
+		localPeer.addStream(stream);
+		localPeer.createOffer(sdpObserverLocal);
+	} else {
+		console.log("localPeer is null");
+	}
+}
+
+function onIceCandidateReceived(peer, iceCandidate) {
+	if (peer == localPeer) {
+		remotePeer.addIceCandidate(iceCandidate);
+	} else {
+		localPeer.addIceCandidate(iceCandidate);
+	}
 }
 
 $.index.open();
